@@ -19,20 +19,41 @@ type Graph struct {
 	Edges    []Edge
 }
 
-func (g *Graph) getRelatedEntities(entityId string, relation string) ([]Entity, error) {
-
+func (g *Graph) getRelatedEntities(entityId string) ([]Entity, error) {
 	if _, exists := g.Entities[entityId]; !exists {
 		return nil, fmt.Errorf("entity %q not found", entityId)
 	}
 
 	var related []Entity
+	queue := []string{entityId}
+	visited := map[string]bool{entityId: true}
 
-	for _, edge := range g.Edges {
-		if edge.From == entityId && edge.Relation == relation {
-			entity, exists := g.Entities[edge.To]
-			if exists {
-				related = append(related, entity)
+	for len(queue) > 0 {
+		first := queue[0]
+		queue = queue[1:]
+
+		element := g.Entities[first]
+
+		if first != entityId {
+			related = append(related, element)
+		}
+
+		for _, edge := range g.Edges {
+			if edge.From != element.ID {
+				continue
 			}
+
+			neighbor := edge.To
+			if neighbor == "" || visited[neighbor] {
+				continue
+			}
+
+			if _, exists := g.Entities[neighbor]; !exists {
+				continue
+			}
+
+			visited[neighbor] = true
+			queue = append(queue, neighbor)
 		}
 	}
 
@@ -53,7 +74,7 @@ func main() {
 	}
 
 	username, relation := "user", "works_at"
-	entities, err := g.getRelatedEntities("user", "works_at")
+	entities, err := g.getRelatedEntities("user")
 
 	if err != nil {
 		fmt.Println("No relation exists")
