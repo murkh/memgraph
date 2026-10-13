@@ -17,6 +17,26 @@ type Edge struct {
 type Graph struct {
 	Entities map[string]Entity
 	Edges    []Edge
+	Outgoing map[string][]Edge
+}
+
+func (g *Graph) AddEntity(entity Entity) {
+	g.Entities[entity.ID] = entity
+}
+
+func (g *Graph) AddEdge(edge Edge) error {
+	if _, exists := g.Entities[edge.From]; !exists {
+		return fmt.Errorf("source entity %q not found", edge.From)
+	}
+
+	if _, exists := g.Entities[edge.To]; !exists {
+		return fmt.Errorf("destination entity %q not found", edge.To)
+	}
+
+	g.Edges = append(g.Edges, edge)
+	g.Outgoing[edge.From] = append(g.Outgoing[edge.From], edge)
+
+	return nil
 }
 
 func (g *Graph) getRelatedEntities(entityId string) ([]Entity, error) {
@@ -71,6 +91,7 @@ func main() {
 			{From: "user", To: "google", Relation: "works_at"},
 			{From: "user", To: "pune", Relation: "lives_in"},
 		},
+		Outgoing: make(map[string][]Edge),
 	}
 
 	username, relation := "user", "works_at"
