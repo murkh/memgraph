@@ -18,6 +18,9 @@ type Edge struct {
 
 	ValidFrom time.Time
 	ValidTo   *time.Time
+
+	RecordedFrom time.Time
+	RecordedTo   *time.Time
 }
 
 type Graph struct {
@@ -47,13 +50,40 @@ func (g *Graph) AddEdge(edge Edge) error {
 		return fmt.Errorf("edge valid-to must be after valid-from")
 	}
 
+	if edge.RecordedFrom.IsZero() {
+		return fmt.Errorf("edge valid-from time is required")
+	}
+
+	if edge.RecordedTo != nil &&
+		!edge.RecordedTo.After(edge.RecordedFrom) {
+		return fmt.Errorf(
+			"recorded-to must be after recorded-from",
+		)
+	}
+
 	g.Edges = append(g.Edges, edge)
 	g.Outgoing[edge.From] = append(g.Outgoing[edge.From], edge)
 
 	return nil
 }
 
-func (e Edge) isValidAt(at time.Time) bool {
+func (e Edge) IsKnownAt(at time.Time) bool {
+	if at.Before(e.RecordedFrom) {
+		return false
+	}
+
+	if e.RecordedTo != nil && !at.Before(*e.RecordedTo) {
+		return false
+	}
+
+	return true
+}
+
+func (e Edge) IsValidAndKnownAt(validAt time.Time, knownAt time.Time) bool {
+	return e.IsValidAt(validAt) && e.IsKnownAt(knownAt)
+}
+
+func (e Edge) IsValidAt(at time.Time) bool {
 	if at.Before(e.ValidFrom) {
 		return false
 	}
@@ -87,7 +117,7 @@ func (g *Graph) getReachableEntitiesAt(
 
 	for head := 0; head < len(queue); head++ {
 		for _, edge := range g.Outgoing[queue[head]] {
-			if !edge.isValidAt(at) || visited[edge.To] {
+			if !edge.IsValidAt(at) || visited[edge.To] {
 				continue
 			}
 
