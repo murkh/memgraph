@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Entity struct {
 	ID   string
@@ -12,6 +15,9 @@ type Edge struct {
 	From     string
 	To       string
 	Relation string
+
+	ValidFrom time.Time
+	ValidTo   *time.Time
 }
 
 type Graph struct {
@@ -33,10 +39,30 @@ func (g *Graph) AddEdge(edge Edge) error {
 		return fmt.Errorf("destination entity %q not found", edge.To)
 	}
 
+	if edge.ValidFrom.IsZero() {
+		return fmt.Errorf("edge valid-from time is required")
+	}
+
+	if edge.ValidTo != nil && !edge.ValidTo.After(edge.ValidFrom) {
+		return fmt.Errorf("edge valid-to must be after valid-from")
+	}
+
 	g.Edges = append(g.Edges, edge)
 	g.Outgoing[edge.From] = append(g.Outgoing[edge.From], edge)
 
 	return nil
+}
+
+func (e Edge) isValidAt(at time.Time) bool {
+	if at.Before(e.ValidFrom) {
+		return false
+	}
+
+	if e.ValidTo != nil && !at.Before(*e.ValidTo) {
+		return false
+	}
+
+	return true
 }
 
 func NewGraph() *Graph {
@@ -45,6 +71,38 @@ func NewGraph() *Graph {
 		Edges:    make([]Edge, 0),
 		Outgoing: make(map[string][]Edge),
 	}
+}
+
+func (g *Graph) getReachableEntitiesAt(
+	startID string,
+	at time.Time,
+) ([]Entity, error) {
+	if _, exists := g.Entities[startID]; !exists {
+		return nil, fmt.Errorf("entity %q not found", startID)
+	}
+
+	queue := []string{startID}
+	visited := map[string]bool{startID: true}
+	related := make([]Entity, 0)
+
+	for head := 0; head < len(queue); head++ {
+		for _, edge := range g.Outgoing[queue[head]] {
+			if !edge.isValidAt(at) || visited[edge.To] {
+				continue
+			}
+
+			neighbor, exists := g.Entities[edge.To]
+			if !exists {
+				continue
+			}
+
+			visited[edge.To] = true
+			queue = append(queue, edge.To)
+			related = append(related, neighbor)
+		}
+	}
+
+	return related, nil
 }
 
 func (g *Graph) getReachableEntities(startId string) ([]Entity, error) {
