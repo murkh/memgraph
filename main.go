@@ -39,6 +39,47 @@ func (g *Graph) AddEdge(edge Edge) error {
 	return nil
 }
 
+func NewGraph() *Graph {
+	return &Graph{
+		Entities: make(map[string]Entity),
+		Edges:    make([]Edge, 0),
+		Outgoing: make(map[string][]Edge),
+	}
+}
+
+func (g *Graph) getReachableEntities(startId string) ([]Entity, error) {
+	if _, exists := g.Entities[startId]; !exists {
+		return nil, fmt.Errorf("entity %q not found", startId)
+	}
+
+	queue := []string{startId}
+	visited := map[string]bool{startId: true}
+	related := make([]Entity, 0)
+
+	for head := 0; head < len(queue); head++ {
+		currentId := queue[head]
+
+		for _, edge := range g.Outgoing[currentId] {
+			neighborId := edge.To
+
+			if visited[neighborId] {
+				continue
+			}
+
+			neighbor, exists := g.Entities[neighborId]
+			if !exists {
+				continue
+			}
+
+			visited[neighborId] = true
+			queue = append(queue, neighborId)
+			related = append(related, neighbor)
+		}
+	}
+
+	return related, nil
+}
+
 func (g *Graph) getRelatedEntities(entityId string) ([]Entity, error) {
 	if _, exists := g.Entities[entityId]; !exists {
 		return nil, fmt.Errorf("entity %q not found", entityId)
@@ -81,26 +122,36 @@ func (g *Graph) getRelatedEntities(entityId string) ([]Entity, error) {
 }
 
 func main() {
-	g := Graph{
-		Entities: map[string]Entity{
-			"user":   {ID: "user", Name: "user"},
-			"google": {ID: "google", Name: "google"},
-			"pune":   {ID: "pune", Name: "pune"},
-		},
-		Edges: []Edge{
-			{From: "user", To: "google", Relation: "works_at"},
-			{From: "user", To: "pune", Relation: "lives_in"},
-		},
-		Outgoing: make(map[string][]Edge),
+	graph := NewGraph()
+
+	graph.AddEntity(Entity{ID: "alice", Name: "Alice", Type: "Person"})
+	graph.AddEntity(Entity{ID: "acme", Name: "Acme", Type: "Company"})
+	graph.AddEntity(Entity{ID: "bob", Name: "Bob", Type: "Person"})
+	graph.AddEntity(Entity{ID: "apollo", Name: "Apollo", Type: "Project"})
+
+	edges := []Edge{
+		{From: "alice", To: "acme", Relation: "works_at"},
+		{From: "alice", To: "bob", Relation: "knows"},
+		{From: "acme", To: "apollo", Relation: "owns"},
+		{From: "bob", To: "alice", Relation: "knows"}, // Cycle
 	}
 
-	username, relation := "user", "works_at"
-	entities, err := g.getRelatedEntities("user")
+	for _, edge := range edges {
+		if err := graph.AddEdge(edge); err != nil {
+			fmt.Println("Could not add edge: ", err)
+			return
+		}
+	}
 
+	related, err := graph.getReachableEntities("alice")
 	if err != nil {
-		fmt.Println("No relation exists")
+		fmt.Println("Traversal failed: ", err)
+		return
 	}
 
-	fmt.Printf("%v is %v at %v", username, relation, entities)
+	fmt.Println("Entities reachable from Alice:")
+	for _, entity := range related {
+		fmt.Printf("- %s (%s)\n", entity.Name, entity.Type)
+	}
 
 }
