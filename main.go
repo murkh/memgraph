@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -239,18 +242,28 @@ func main() {
 		}
 	}
 
-	now := time.Now()
-	for _, knownAt := range []time.Time{oct2026.AddDate(0, 0, -1), now} {
-		related, err := graph.getReachableEntitiesAt("alice", now, knownAt)
-		if err != nil {
-			fmt.Println("Traversal failed: ", err)
-			return
-		}
+	conversation := `
+		Alice worked at Acme from January 1, 2024 through August 31, 2025.
+		She joined Globex on September 1, 2025, and she still works there.
+		`
 
-		fmt.Printf("Entities reachable from Alice now, as known on %s:\n", knownAt.Format(time.DateOnly))
-		for _, entity := range related {
-			fmt.Printf("- %s (%s)\n", entity.Name, entity.Type)
-		}
+	ctx := context.Background()
+
+	extraction, err := ExtractMemories(
+		ctx, conversation, os.Getenv("OPENAI_MODEL"),
+	)
+
+	if err != nil {
+		fmt.Println("Memory Extraction failed:", err)
 	}
+
+	output, err := json.MarshalIndent(extraction, "", " ")
+	if err != nil {
+		fmt.Println("Could not marshal extraction:", err)
+		return
+	}
+
+	fmt.Println("\n LLM EXTRACTED")
+	fmt.Println(string(output))
 
 }
