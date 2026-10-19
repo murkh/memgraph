@@ -25,6 +25,9 @@ type Edge struct {
 
 	RecordedFrom time.Time
 	RecordedTo   *time.Time
+
+	SourceEpisodeID string
+	Evidence        string
 }
 
 type Graph struct {
@@ -318,6 +321,13 @@ func ValidateExtraction(extraction Extraction) ValidationReport {
 			continue
 		}
 
+		if fact.TemporalStatus == "unknown" {
+			pending(
+				"temporal status is unknown; do not create an open-ended edge",
+			)
+			continue
+		}
+
 		// 8. Convert the optional end date into a pointer.
 		var validToPtr *time.Time
 
@@ -418,5 +428,28 @@ func main() {
 	for _, issue := range report.Rejected {
 		fmt.Printf("REJECTED: %s\n", issue.Reason)
 	}
+
+	if len(report.Ready) == 0 {
+		fmt.Println("No facts are ready to be stored.")
+		return
+	}
+
+	sourceID := "conversation-001"
+
+	if err := ApplyExtraction(
+		graph,
+		extraction,
+		report,
+		sourceID,
+		time.Now().UTC(),
+	); err != nil {
+		fmt.Println("Could not apply extraction:", err)
+		return
+	}
+
+	fmt.Printf(
+		"Memory updated: %d facts accepted\n",
+		len(report.Ready),
+	)
 
 }
