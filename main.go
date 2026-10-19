@@ -395,4 +395,28 @@ func main() {
 	fmt.Println("\n LLM EXTRACTED")
 	fmt.Println(string(output))
 
+	report := ValidateExtraction(extraction)
+
+	fmt.Printf("\n Ready: %d\n", len(report.Ready))
+	fmt.Printf("\n Pending: %d\n", len(report.Pending))
+	fmt.Printf("\n Rejected: %d\n", len(report.Rejected))
+
+	for _, fact := range report.Ready {
+		fmt.Printf(
+			"READY: %s --%s--> %s (from %s)\n",
+			fact.Fact.Subject,
+			fact.Fact.Relation,
+			fact.Fact.Object,
+			fact.ValidFrom.Format("2006-01-02"),
+		)
+	}
+
+	for _, issue := range report.Pending {
+		fmt.Printf("PENDING: %s\n", issue.Reason)
+	}
+
+	for _, issue := range report.Rejected {
+		fmt.Printf("REJECTED: %s\n", issue.Reason)
+	}
+
 }
