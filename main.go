@@ -105,7 +105,8 @@ func NewGraph() *Graph {
 
 func (g *Graph) getReachableEntitiesAt(
 	startID string,
-	at time.Time,
+	validAt time.Time,
+	knownAt time.Time,
 ) ([]Entity, error) {
 	if _, exists := g.Entities[startID]; !exists {
 		return nil, fmt.Errorf("entity %q not found", startID)
@@ -117,7 +118,7 @@ func (g *Graph) getReachableEntitiesAt(
 
 	for head := 0; head < len(queue); head++ {
 		for _, edge := range g.Outgoing[queue[head]] {
-			if !edge.IsValidAt(at) || visited[edge.To] {
+			if !edge.IsValidAndKnownAt(validAt, knownAt) || visited[edge.To] {
 				continue
 			}
 
@@ -135,7 +136,7 @@ func (g *Graph) getReachableEntitiesAt(
 	return related, nil
 }
 
-func (g *Graph) getReachableEntities(startId string) ([]Entity, error) {
+func (g *Graph) getReachableEntities(startId string, validAt time.Time, knownAt time.Time) ([]Entity, error) {
 	if _, exists := g.Entities[startId]; !exists {
 		return nil, fmt.Errorf("entity %q not found", startId)
 	}
@@ -216,12 +217,19 @@ func main() {
 	graph.AddEntity(Entity{ID: "acme", Name: "Acme", Type: "Company"})
 	graph.AddEntity(Entity{ID: "bob", Name: "Bob", Type: "Person"})
 	graph.AddEntity(Entity{ID: "apollo", Name: "Apollo", Type: "Project"})
+	graph.AddEntity(Entity{ID: "globex", Name: "Globex", Type: "Company"})
+
+	jan2024 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	sep2025 := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
+	oct2026 := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 
 	edges := []Edge{
-		{From: "alice", To: "acme", Relation: "works_at"},
-		{From: "alice", To: "bob", Relation: "knows"},
-		{From: "acme", To: "apollo", Relation: "owns"},
-		{From: "bob", To: "alice", Relation: "knows"}, // Cycle
+		{From: "alice", To: "acme", Relation: "works_at", ValidFrom: jan2024, RecordedFrom: jan2024, RecordedTo: &oct2026},
+		{From: "alice", To: "acme", Relation: "works_at", ValidFrom: jan2024, ValidTo: &sep2025, RecordedFrom: oct2026},
+		{From: "alice", To: "globex", Relation: "works_at", ValidFrom: sep2025, RecordedFrom: oct2026},
+		{From: "alice", To: "bob", Relation: "knows", ValidFrom: jan2024, RecordedFrom: jan2024},
+		{From: "acme", To: "apollo", Relation: "owns", ValidFrom: jan2024, RecordedFrom: jan2024},
+		{From: "bob", To: "alice", Relation: "knows", ValidFrom: jan2024, RecordedFrom: jan2024}, // Cycle
 	}
 
 	for _, edge := range edges {
@@ -231,15 +239,18 @@ func main() {
 		}
 	}
 
-	related, err := graph.getReachableEntities("alice")
-	if err != nil {
-		fmt.Println("Traversal failed: ", err)
-		return
-	}
+	now := time.Now()
+	for _, knownAt := range []time.Time{oct2026.AddDate(0, 0, -1), now} {
+		related, err := graph.getReachableEntitiesAt("alice", now, knownAt)
+		if err != nil {
+			fmt.Println("Traversal failed: ", err)
+			return
+		}
 
-	fmt.Println("Entities reachable from Alice:")
-	for _, entity := range related {
-		fmt.Printf("- %s (%s)\n", entity.Name, entity.Type)
+		fmt.Printf("Entities reachable from Alice now, as known on %s:\n", knownAt.Format(time.DateOnly))
+		for _, entity := range related {
+			fmt.Printf("- %s (%s)\n", entity.Name, entity.Type)
+		}
 	}
 
 }
