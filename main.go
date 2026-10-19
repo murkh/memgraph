@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -211,6 +212,134 @@ func (g *Graph) getRelatedEntities(entityId string) ([]Entity, error) {
 	}
 
 	return related, nil
+}
+
+func ValidateExtraction(extraction Extraction) ValidationReport {
+	report := ValidationReport{
+		Ready:    make([]ParsedFact, 0),
+		Pending:  make([]FactIssue, 0),
+		Rejected: make([]FactIssue, 0),
+	}
+
+	// Build a lookup of names supplied by the extractor.
+	entityNames := make(map[string]bool)
+
+	for _, entity := range extraction.Entities {
+		name := normalizeName(entity.Name)
+
+		if name != "" && strings.TrimSpace(entity.Type) != "" {
+			entityNames[name] = true
+		}
+	}
+
+	for _, fact := range extraction.Facts {
+		reject := func(reason string) {
+			report.Rejected = append(report.Rejected, FactIssue{
+				Fact:   fact,
+				Reason: reason,
+			})
+		}
+
+		pending := func(reason string) {
+			report.Pending = append(report.Pending, FactIssue{
+				Fact:   fact,
+				Reason: reason,
+			})
+		}
+
+		// 1. Required text fields.
+		if strings.TrimSpace(fact.Subject) == "" ||
+			strings.TrimSpace(fact.Relation) == "" ||
+			strings.TrimSpace(fact.Object) == "" {
+			reject("subject, relation, and object are required")
+			continue
+		}
+
+		if strings.TrimSpace(fact.Evidence) == "" {
+			reject("supporting evidence is required")
+			continue
+		}
+
+		// 2. Both endpoints must be among the extracted entities.
+		if !entityNames[normalizeName(fact.Subject)] {
+			reject("subject does not match an extracted entity")
+			continue
+		}
+
+		if !entityNames[normalizeName(fact.Object)] {
+			reject("object does not match an extracted entity")
+			continue
+		}
+
+		// 3. Validate temporal status.
+		switch fact.TemporalStatus {
+		case "current", "historical", "unknown":
+		default:
+			reject("invalid temporal_status")
+			continue
+		}
+
+		// 4. Parse the exact date strings.
+		validFrom, err := parseExactDate(fact.ValidFrom)
+		if err != nil {
+			reject(err.Error())
+			continue
+		}
+
+		validTo, err := parseExactDate(fact.ValidTo)
+		if err != nil {
+			reject(err.Error())
+			continue
+		}
+
+		hasStart := fact.ValidFrom != ""
+		hasEnd := fact.ValidTo != ""
+
+		// 5. An interval must have a positive duration.
+		if hasStart && hasEnd && !validTo.After(validFrom) {
+			reject("valid_to must be after valid_from")
+			continue
+		}
+
+		// 6. A current relationship cannot have a known end.
+		if fact.TemporalStatus == "current" && hasEnd {
+			reject("current fact cannot have a valid_to date")
+			continue
+		}
+
+		// 7. Do not invent missing boundaries.
+		if !hasStart {
+			pending("exact valid_from date is unknown")
+			continue
+		}
+
+		if fact.TemporalStatus == "historical" && !hasEnd {
+			pending("historical fact has no exact end boundary")
+			continue
+		}
+
+		// 8. Convert the optional end date into a pointer.
+		var validToPtr *time.Time
+
+		if hasEnd {
+			validToCopy := validTo
+			validToPtr = &validToCopy
+		}
+
+		report.Ready = append(report.Ready, ParsedFact{
+			Fact:      fact,
+			ValidFrom: validFrom,
+			ValidTo:   validToPtr,
+		})
+	}
+
+	return report
+}
+
+func normalizeName(value string) string {
+	return strings.ToLower(
+		strings.Join(strings.Fields(value), " "),
+	)
 }
 
 func main() {
