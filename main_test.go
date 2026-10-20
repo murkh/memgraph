@@ -196,3 +196,49 @@ func TestAddEdgeFailureDoesNotConsumeID(t *testing.T) {
 		t.Fatalf("expected first stored edge to be edge-1, got %q", graph.Edges[0].ID)
 	}
 }
+
+func TestSetRecordedToRejectsBoundaryBeforeRecordedFrom(t *testing.T) {
+	graph := NewGraph()
+
+	graph.AddEntity(Entity{ID: "person:alice", Name: "Alice", Type: "Person"})
+	graph.AddEntity(Entity{ID: "company:acme", Name: "Acme", Type: "Company"})
+
+	jan2024 := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	if err := graph.AddEdge(Edge{
+		From:         "person:alice",
+		To:           "company:acme",
+		Relation:     "employed_by",
+		ValidFrom:    jan2024,
+		RecordedFrom: jan2024,
+	}); err != nil {
+		t.Fatalf("add edge: %v", err)
+	}
+
+	edgeID := graph.Edges[0].ID
+
+	if err := graph.setRecordedTo(edgeID, jan2024.Add(-time.Hour)); err == nil {
+		t.Fatal("expected recorded-to before recorded-from to be rejected")
+	}
+
+	if graph.Edges[0].RecordedTo != nil {
+		t.Fatal("rejected boundary changed the canonical edge")
+	}
+
+	if graph.Outgoing["person:alice"][0].RecordedTo != nil {
+		t.Fatal("rejected boundary changed the outgoing copy")
+	}
+}
+
+func TestFindEdgeByIDRejectsDuplicateIDs(t *testing.T) {
+	graph := NewGraph()
+
+	graph.Edges = []Edge{
+		{ID: "edge-1", Relation: "employed_by"},
+		{ID: "edge-1", Relation: "lives_in"},
+	}
+
+	if edge, err := graph.findEdgeByID("edge-1"); err == nil {
+		t.Fatalf("expected duplicate edge ID to be rejected, got %+v", edge)
+	}
+}

@@ -89,13 +89,28 @@ func (g *Graph) validateEdge(edge Edge) error {
 }
 
 func (g *Graph) findEdgeByID(edgeID string) (*Edge, error) {
+	var found *Edge
+
 	for i := range g.Edges {
-		if g.Edges[i].ID == edgeID {
-			return &g.Edges[i], nil
+		if g.Edges[i].ID != edgeID {
+			continue
 		}
+
+		if found != nil {
+			return nil, fmt.Errorf(
+				"duplicate edge ID %q found",
+				edgeID,
+			)
+		}
+
+		found = &g.Edges[i]
 	}
 
-	return nil, fmt.Errorf("edge %q not found", edgeID)
+	if found == nil {
+		return nil, fmt.Errorf("edge %q not found", edgeID)
+	}
+
+	return found, nil
 }
 
 func (g *Graph) setRecordedTo(edgeID string, recordedTo time.Time) error {
@@ -134,6 +149,18 @@ func (g *Graph) setRecordedTo(edgeID string, recordedTo time.Time) error {
 		return fmt.Errorf(
 			"outgoing edge with ID %q not found in g.Outgoing[%q]",
 			edgeID, edge.From,
+		)
+	}
+
+	recordedTo = recordedTo.UTC()
+
+	if recordedTo.IsZero() {
+		return fmt.Errorf("recorded-to time is required")
+	}
+
+	if !recordedTo.After(edge.RecordedFrom) {
+		return fmt.Errorf(
+			"recorded-to must be after recorded-from",
 		)
 	}
 
