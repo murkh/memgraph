@@ -16,6 +16,7 @@ type Entity struct {
 }
 
 type Edge struct {
+	ID       string
 	From     string
 	To       string
 	Relation string
@@ -34,6 +35,8 @@ type Graph struct {
 	Entities map[string]Entity
 	Edges    []Edge
 	Outgoing map[string][]Edge
+
+	nextEdgeID uint64
 }
 
 func (g *Graph) AddEntity(entity Entity) {
@@ -41,6 +44,20 @@ func (g *Graph) AddEntity(entity Entity) {
 }
 
 func (g *Graph) AddEdge(edge Edge) error {
+	if err := g.validateEdge(edge); err != nil {
+		return err
+	}
+
+	g.nextEdgeID++
+	edge.ID = fmt.Sprintf("edge-%d", g.nextEdgeID)
+
+	g.Edges = append(g.Edges, edge)
+	g.Outgoing[edge.From] = append(g.Outgoing[edge.From], edge)
+
+	return nil
+}
+
+func (g *Graph) validateEdge(edge Edge) error {
 	if _, exists := g.Entities[edge.From]; !exists {
 		return fmt.Errorf("source entity %q not found", edge.From)
 	}
@@ -58,7 +75,7 @@ func (g *Graph) AddEdge(edge Edge) error {
 	}
 
 	if edge.RecordedFrom.IsZero() {
-		return fmt.Errorf("edge valid-from time is required")
+		return fmt.Errorf("edge recorded-from time is required")
 	}
 
 	if edge.RecordedTo != nil &&
@@ -68,8 +85,127 @@ func (g *Graph) AddEdge(edge Edge) error {
 		)
 	}
 
-	g.Edges = append(g.Edges, edge)
-	g.Outgoing[edge.From] = append(g.Outgoing[edge.From], edge)
+	return nil
+}
+
+func (g *Graph) findEdgeByID(edgeID string) (*Edge, error) {
+	for i := range g.Edges {
+		if g.Edges[i].ID == edgeID {
+			return &g.Edges[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("edge %q not found", edgeID)
+}
+
+func (g *Graph) setRecordedTo(edgeID string, recordedTo time.Time) error {
+	// 1. Find the edge in g.Edges.
+	// 2. Verify its RecordedTo is nil.
+	// 3. Find the same ID in g.Outgoing[edge.From].
+	// 4. Verify the outgoing copy exists exactly once.
+	// 5. Update RecordedTo in BOTH copies.
+
+	edge, err := g.findEdgeByID(edgeID)
+	if err != nil {
+		return err
+	}
+
+	if edge.RecordedTo != nil {
+		return fmt.Errorf("edge %q already has a recorded-to time", edgeID)
+	}
+
+	outgoingEdges := g.Outgoing[edge.From]
+	var outgoingEdge *Edge
+
+	for i := range outgoingEdges {
+		if outgoingEdges[i].ID == edgeID {
+			if outgoingEdge != nil {
+				return fmt.Errorf(
+					"multiple outgoing edges with ID %q found",
+					edgeID,
+				)
+			}
+
+			outgoingEdge = &outgoingEdges[i]
+		}
+	}
+
+	if outgoingEdge == nil {
+		return fmt.Errorf(
+			"outgoing edge with ID %q not found in g.Outgoing[%q]",
+			edgeID, edge.From,
+		)
+	}
+
+	outgoingEdge.RecordedTo = &recordedTo
+	edge.RecordedTo = &recordedTo
+
+	return nil
+}
+
+func (g *Graph) CorrectEdge(oldEdgeID string, replacement Edge, recordedAt time.Time) error {
+	// 1. Validate that recordedAt is not zero. Convert it to UTC.
+	// 2. Find the old edge using findEdgeByID. Reject the operation if it doesn't exist or its RecordedTo is already set.
+	// 3. Check that recordedAt is strictly later than the old edge's RecordedFrom.
+	// 4. Verify that replacement.From, replacement.To and replacement.Relation match the original edge. Require a source episode ID and supporting evidence.
+	// 5. Give the replacement a new recorded-time interval: RecordedFrom = recordedAt and RecordedTo = nil. Clear its ID so AddEdge assigns a new one.
+	// 6. Validate the replacement completely before modifying the old edge. Reuse the same edge-validation rules as AddEdge.
+	// 7. Close the old recorded-time version using setRecordedTo.Insert the corrected version using AddEdge.
+
+	recordedAt = recordedAt.UTC()
+
+	if recordedAt.IsZero() {
+		return fmt.Errorf("recordedAt time is required")
+	}
+
+	oldEdge, err := g.findEdgeByID(oldEdgeID)
+	if err != nil {
+		return err
+	}
+
+	if oldEdge.RecordedTo != nil {
+		return fmt.Errorf("edge %q already has a recorded-to time", oldEdgeID)
+	}
+
+	if !recordedAt.After(oldEdge.RecordedFrom) {
+		return fmt.Errorf(
+			"recordedAt time must be after the old edge's recorded-from time",
+		)
+	}
+
+	if replacement.From != oldEdge.From ||
+		replacement.To != oldEdge.To ||
+		replacement.Relation != oldEdge.Relation {
+		return fmt.Errorf(
+			"replacement edge must have the same From, To, and Relation as the original edge",
+		)
+	}
+
+	if strings.TrimSpace(replacement.SourceEpisodeID) == "" {
+		return fmt.Errorf("replacement edge must have a source episode ID")
+	}
+
+	if strings.TrimSpace(replacement.Evidence) == "" {
+		return fmt.Errorf("replacement edge must have supporting evidence")
+	}
+
+	replacement.RecordedFrom = recordedAt
+	replacement.RecordedTo = nil
+	replacement.ID = ""
+
+	if err := g.validateEdge(replacement); err != nil {
+		return fmt.Errorf("invalid replacement edge: %v", err)
+	}
+
+	// setRecordedTo checks everything before mutating, and AddEdge cannot
+	// fail on an already-validated edge, so no partial update is possible.
+	if err := g.setRecordedTo(oldEdgeID, recordedAt); err != nil {
+		return fmt.Errorf("failed to close old edge: %v", err)
+	}
+
+	if err := g.AddEdge(replacement); err != nil {
+		return fmt.Errorf("failed to add replacement edge: %v", err)
+	}
 
 	return nil
 }
