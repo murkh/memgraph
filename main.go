@@ -557,6 +557,7 @@ func main() {
 
 	if err != nil {
 		fmt.Println("Memory Extraction failed:", err)
+		return
 	}
 
 	output, err := json.MarshalIndent(extraction, "", " ")
